@@ -16,42 +16,37 @@
 
 package com.github.lepoitr.kafka.connect.smt;
 
+import static org.apache.kafka.connect.transforms.util.Requirements.requireMap;
+import static org.apache.kafka.connect.transforms.util.Requirements.requireStruct;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.connect.connector.ConnectRecord;
-
-
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
-
 import org.apache.kafka.connect.transforms.Transformation;
 import org.apache.kafka.connect.transforms.util.SchemaUtil;
 import org.apache.kafka.connect.transforms.util.SimpleConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Collections;
-
-import static org.apache.kafka.connect.transforms.util.Requirements.requireMap;
-import static org.apache.kafka.connect.transforms.util.Requirements.requireStruct;
-
 public abstract class DropNulls<R extends ConnectRecord<R>> implements Transformation<R> {
 
   private static final Logger log = LoggerFactory.getLogger(DropNulls.class);
 
-  public static final String OVERVIEW_DOC =
-    "remove top level fields with null value";
+  public static final String OVERVIEW_DOC = "remove top level fields with null value";
 
   private interface ConfigName {
     String DROPNULLS_VERBOSE = "dropnulls.verbose";
   }
 
-  public static final ConfigDef CONFIG_DEF = new ConfigDef().define(ConfigName.DROPNULLS_VERBOSE, ConfigDef.Type.INT, 0, ConfigDef.Importance.LOW,
+  public static final ConfigDef CONFIG_DEF = new ConfigDef().define(ConfigName.DROPNULLS_VERBOSE, ConfigDef.Type.INT, 0,
+      ConfigDef.Importance.LOW,
       "Log message verbosity level");
 
   private static final String PURPOSE = "verbosesity: 0 - warn/error only, 1+ - processing info";
@@ -62,9 +57,8 @@ public abstract class DropNulls<R extends ConnectRecord<R>> implements Transform
   public void configure(Map<String, ?> props) {
     final SimpleConfig config = new SimpleConfig(CONFIG_DEF, props);
     verbose = config.getInt(ConfigName.DROPNULLS_VERBOSE);
-    log.info("DropNulls SMT configured with verbose={}.",verbose);
+    log.info("DropNulls SMT configured with verbose={}.", verbose);
   }
-
 
   @Override
   public R apply(R record) {
@@ -76,90 +70,102 @@ public abstract class DropNulls<R extends ConnectRecord<R>> implements Transform
   }
 
   private R applySchemaless(R record) {
-    //TODO
-    log.error("DropNulls: Schemaless records not supported yet.");
-    return record;
-  }
+    final Map<String, Object> value = requireMap(operatingValue(record), PURPOSE);
+    final Map<String, Object> newValue = new HashMap<>();
 
-private Boolean isNullOrEmpty(Field field, Object fieldvalue){
-  if(fieldvalue == null){
-    if (verbose > 0) log.info("{} skipped - value is null",field);
-    
-  }else if(field.schema().type().equals(Schema.Type.ARRAY)){
-        List<Object> al = (List<Object>)fieldvalue;
-        if (al.size() == 0) {
-	        if (verbose > 0) log.info("{} skipped - empty array",field);
-        
-        }else{
-          if (verbose > 0) log.info("{} not empy array ",field);
-          return false;
+    for (Map.Entry<String, Object> entry : value.entrySet()) {
+      if (entry.getValue() != null) {
+        newValue.put(entry.getKey(), entry.getValue());
+      } else {
+        if (verbose > 0) {
+          log.info("{} skipped - value is null", entry.getKey());
         }
-   
-  }else{
-    if (verbose > 0) log.info("{} not an array and not null value",field);
-    return false ;
-  }
-  return true;
-}
-
-
-private Object addIfNullOrEmpty(SchemaBuilder builder, Field field,Object fieldValue){
-  SchemaBuilder subBuilder = SchemaBuilder.struct();
-  Object retVal = null;
-  Map<String,Object> newValues = new HashMap<>();
-  if(field.schema().type().equals(Schema.Type.STRUCT)){
-    Struct fieldValueStruct = (Struct) fieldValue;
-    for(Field subField: field.schema().fields()){
-      Object subFieldValue =  fieldValueStruct.get(subField);
-      Object newValue = addIfNullOrEmpty(subBuilder, subField, subFieldValue);
-      if (newValue != null) {
-        newValues.put(subField.name(), newValue);
       }
     }
-    if( subBuilder.fields().size() > 0){
-      Schema subSchema = subBuilder.build();
-      Struct retValStruct = new Struct(subSchema);
-      for(Field newField: subSchema.fields()){
-        retValStruct.put(newField,newValues.get(newField.name()));
-      }
-    builder.field(field.name(),subSchema) ;
-    retVal = (Object) retValStruct;
-    }
-  }else{
-    if( ! isNullOrEmpty(field, fieldValue) ){
-      builder.field(field.name(), field.schema());
-      retVal = fieldValue;
-    }
+
+    return newRecord(record, null, newValue);
   }
-  return retVal;
-}
+
+  private Boolean isNullOrEmpty(Field field, Object fieldvalue) {
+    if (fieldvalue == null) {
+      if (verbose > 0)
+        log.info("{} skipped - value is null", field);
+
+    } else if (field.schema().type().equals(Schema.Type.ARRAY)) {
+      List<Object> al = (List<Object>) fieldvalue;
+      if (al.size() == 0) {
+        if (verbose > 0)
+          log.info("{} skipped - empty array", field);
+
+      } else {
+        if (verbose > 0)
+          log.info("{} not empy array ", field);
+        return false;
+      }
+
+    } else {
+      if (verbose > 0)
+        log.info("{} not an array and not null value", field);
+      return false;
+    }
+    return true;
+  }
+
+  private Object addIfNullOrEmpty(SchemaBuilder builder, Field field, Object fieldValue) {
+    SchemaBuilder subBuilder = SchemaBuilder.struct();
+    Object retVal = null;
+    Map<String, Object> newValues = new HashMap<>();
+    if (field.schema().type().equals(Schema.Type.STRUCT)) {
+      Struct fieldValueStruct = (Struct) fieldValue;
+      for (Field subField : field.schema().fields()) {
+        Object subFieldValue = fieldValueStruct.get(subField);
+        Object newValue = addIfNullOrEmpty(subBuilder, subField, subFieldValue);
+        if (newValue != null) {
+          newValues.put(subField.name(), newValue);
+        }
+      }
+      if (subBuilder.fields().size() > 0) {
+        Schema subSchema = subBuilder.build();
+        Struct retValStruct = new Struct(subSchema);
+        for (Field newField : subSchema.fields()) {
+          retValStruct.put(newField, newValues.get(newField.name()));
+        }
+        builder.field(field.name(), subSchema);
+        retVal = (Object) retValStruct;
+      }
+    } else {
+      if (!isNullOrEmpty(field, fieldValue)) {
+        builder.field(field.name(), field.schema());
+        retVal = fieldValue;
+      }
+    }
+    return retVal;
+  }
 
   public R applyWithSchemaRecursive(R record) {
     final Struct value = requireStruct(operatingValue(record), PURPOSE);
 
-   
     final SchemaBuilder builder = SchemaUtil.copySchemaBasics(value.schema(), SchemaBuilder.struct());
 
-      final Map<String,Object> newValues = new HashMap<>();
-    for (Field field: value.schema().fields()) {
-      Object fieldValue =  value.get(field);
+    final Map<String, Object> newValues = new HashMap<>();
+    for (Field field : value.schema().fields()) {
+      Object fieldValue = value.get(field);
       Object newValue = addIfNullOrEmpty(builder, field, fieldValue);
-      if(null != newValue){
-        newValues.put(field.name(),newValue);
+      if (null != newValue) {
+        newValues.put(field.name(), newValue);
       }
     }
 
-    
     Schema updatedSchema = builder.build();
     final Struct updatedValue = new Struct(updatedSchema);
 
-      for (Field field: updatedSchema.fields()) {
+    for (Field field : updatedSchema.fields()) {
 
-        if (verbose > 0) log.info("{} added",field);
-        
-        updatedValue.put(field.name(), newValues.get(field.name()));  
+      if (verbose > 0)
+        log.info("{} added", field);
+
+      updatedValue.put(field.name(), newValues.get(field.name()));
     }
-  
 
     return newRecord(record, updatedSchema, updatedValue);
   }
@@ -167,33 +173,32 @@ private Object addIfNullOrEmpty(SchemaBuilder builder, Field field,Object fieldV
   private R applyWithSchema(R record) {
     final Struct value = requireStruct(operatingValue(record), PURPOSE);
 
-   
     final SchemaBuilder builder = SchemaUtil.copySchemaBasics(value.schema(), SchemaBuilder.struct());
-   
-    for (Field field: value.schema().fields()) {
-      if(value.get(field) != null){    
-        if (verbose > 0) log.info("{} not null",field);
+
+    for (Field field : value.schema().fields()) {
+      if (value.get(field) != null) {
+        if (verbose > 0)
+          log.info("{} not null", field);
         builder.field(field.name(), field.schema());
 
-      }else{
-        if (verbose > 0) log.info("{} null -should be skipped",field);
+      } else {
+        if (verbose > 0)
+          log.info("{} null -should be skipped", field);
       }
     }
 
-      Schema updatedSchema = builder.build();
+    Schema updatedSchema = builder.build();
 
-      final Struct updatedValue = new Struct(updatedSchema);
-      for (Field field: updatedSchema.fields()) {
-        if (verbose > 0) log.info("{} added",field);
-        
-        updatedValue.put(field.name(), value.get(field.name()));  
+    final Struct updatedValue = new Struct(updatedSchema);
+    for (Field field : updatedSchema.fields()) {
+      if (verbose > 0)
+        log.info("{} added", field);
+
+      updatedValue.put(field.name(), value.get(field.name()));
     }
-
 
     return newRecord(record, updatedSchema, updatedValue);
   }
-
-
 
   @Override
   public ConfigDef config() {
@@ -203,7 +208,6 @@ private Object addIfNullOrEmpty(SchemaBuilder builder, Field field,Object fieldV
   @Override
   public void close() {
   }
-
 
   protected abstract Schema operatingSchema(R record);
 
@@ -225,7 +229,8 @@ private Object addIfNullOrEmpty(SchemaBuilder builder, Field field,Object fieldV
 
     @Override
     protected R newRecord(R record, Schema updatedSchema, Object updatedValue) {
-      return record.newRecord(record.topic(), record.kafkaPartition(), updatedSchema, updatedValue, record.valueSchema(), record.value(), record.timestamp());
+      return record.newRecord(record.topic(), record.kafkaPartition(), updatedSchema, updatedValue,
+          record.valueSchema(), record.value(), record.timestamp());
     }
 
   }
@@ -244,10 +249,9 @@ private Object addIfNullOrEmpty(SchemaBuilder builder, Field field,Object fieldV
 
     @Override
     protected R newRecord(R record, Schema updatedSchema, Object updatedValue) {
-      return record.newRecord(record.topic(), record.kafkaPartition(), record.keySchema(), record.key(), updatedSchema, updatedValue, record.timestamp());
+      return record.newRecord(record.topic(), record.kafkaPartition(), record.keySchema(), record.key(), updatedSchema,
+          updatedValue, record.timestamp());
     }
 
   }
 }
-
-
